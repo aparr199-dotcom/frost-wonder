@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="512" y2="512" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#070d1f" />
+      <stop offset="50%" stop-color="#112248" />
+      <stop offset="100%" stop-color="#1e1b4b" />
+    </linearGradient>
+    <linearGradient id="crystal" x1="128" y1="64" x2="384" y2="448" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#e0f2fe" />
+      <stop offset="50%" stop-color="#7dd3fc" />
+      <stop offset="100%" stop-color="#c4b5fd" />
+    </linearGradient>
+    <linearGradient id="gold" x1="160" y1="96" x2="352" y2="416" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#fef3c7" />
+      <stop offset="100%" stop-color="#f59e0b" />
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#bg)" />
+  <circle cx="256" cy="256" r="196" stroke="url(#crystal)" stroke-width="4" stroke-opacity="0.35" />
+  <!-- Ice Palace Spire & Snowflake Star -->
+  <path d="M256 68L296 196L388 156L324 248L428 288L312 316L348 412L256 348L164 412L200 316L84 288L188 248L124 156L216 196L256 68Z" fill="url(#crystal)" fill-opacity="0.22" stroke="url(#crystal)" stroke-width="8" stroke-linejoin="round" />
+  <path d="M256 96V416M96 256H416M143 143L369 369M369 143L143 369" stroke="url(#gold)" stroke-width="10" stroke-linecap="round" />
+  <circle cx="256" cy="256" r="32" fill="url(#gold)" />
+</svg>

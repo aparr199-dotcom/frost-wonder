@@ -1,0 +1,6 @@
+{
+  "name": "Frost & Wonder — Magical Christmas Countdown & Family Gift Planner",
+  "description": "A minimalist, cinematic Christmas countdown lock-screen wallpaper designer and milestone timeline for macOS, counting down to December 25, 2026.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
