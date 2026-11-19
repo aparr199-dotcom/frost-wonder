@@ -768,26 +768,163 @@ export function validateAndParseVaultBackup(rawJson: string):
 }
 
 /**
- * Accurate Mac wallpaper resolution presets (never mislabeling 2560x1440 as 4K).
+ * Accurate wallpaper resolution presets (Desktop 16:9 and Mobile 19.5:9, never mislabeling 2560x1440 as 4K).
  */
 export const WALLPAPER_RESOLUTIONS = {
   qhd_2560x1440: {
     id: 'qhd_2560x1440' as const,
     width: 2560,
     height: 1440,
-    shortLabel: '2560 × 1440 (QHD / 1440p)',
-    technicalLabel: 'QHD / WQHD 1440p (16:9 Mac & Studio Display Standard)',
+    shortLabel: '2560 × 1440 (Desktop QHD)',
+    technicalLabel: 'Desktop 16:9 Mac & Windows Standard',
     aspectRatio: '16:9' as const,
   },
   uhd_3840x2160: {
     id: 'uhd_3840x2160' as const,
     width: 3840,
     height: 2160,
-    shortLabel: '3840 × 2160 (True 4K UHD)',
-    technicalLabel: '4K UHD 2160p (16:9 High-DPI Retina Export)',
+    shortLabel: '3840 × 2160 (Desktop True 4K)',
+    technicalLabel: 'Desktop 16:9 Retina 4K Export',
     aspectRatio: '16:9' as const,
   },
+  mobile_1290x2796: {
+    id: 'mobile_1290x2796' as const,
+    width: 1290,
+    height: 2796,
+    shortLabel: '1290 × 2796 (Mobile Portrait)',
+    technicalLabel: 'Mobile 19.5:9 iPhone & Android Portrait',
+    aspectRatio: '19.5:9' as const,
+  },
 };
+
+export type MilestoneVisualState =
+  | 'upcoming' // Soft icy-blue glow, illuminated border, Next Up badge
+  | 'today' // Lavender-and-silver shimmer with Today badge
+  | 'future' // Frosted glass styling without glow
+  | 'past' // Dimmed, but remains visible
+  | 'completed'; // User marked completed with checkmark
+
+export interface MilestoneDisplayStatus {
+  state: MilestoneVisualState;
+  isGlow: boolean;
+  badgeText?: string;
+  formattedDate: string;
+  tMinusText: string;
+  shortTitle: string;
+}
+
+/**
+ * Automatically computes the visual state for a milestone:
+ * - Next upcoming milestone gets soft icy-blue glow and 'Next Up' badge
+ * - Milestones reached today get lavender shimmer and 'Today' badge
+ * - Completed milestones get checkmark styling
+ * - Past milestones are slightly dimmed but visible
+ * - Future milestones have elegant frosted-glass styling
+ */
+export function getMilestoneDisplayStatus(
+  milestone: HolidayMilestone,
+  now: Date,
+  allSortedMilestones: HolidayMilestone[]
+): MilestoneDisplayStatus {
+  const parsedDate = new Date(milestone.targetDate);
+  const isValidDate = !Number.isNaN(parsedDate.getTime());
+  const formattedDate = isValidDate
+    ? parsedDate.toLocaleDateString('en-US', {
+        month: 'short',
+        day: 'numeric',
+      })
+    : 'Dec 25';
+
+  const tMinusText =
+    milestone.tMinusLabel ||
+    (isValidDate
+      ? `T–${Math.max(
+          0,
+          Math.ceil((parsedDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24))
+        )}`
+      : 'T–0');
+
+  const shortTitle = milestone.title
+    .replace(/^Time to Decorate the\s+/i, '')
+    .trim();
+
+  // 1. Manually completed
+  if (milestone.completed) {
+    return {
+      state: 'completed',
+      isGlow: false,
+      formattedDate,
+      tMinusText,
+      shortTitle,
+    };
+  }
+
+  // Check if today matches calendar day
+  const isSameCalendarDay =
+    isValidDate &&
+    parsedDate.getFullYear() === now.getFullYear() &&
+    parsedDate.getMonth() === now.getMonth() &&
+    parsedDate.getDate() === now.getDate();
+
+  if (isSameCalendarDay) {
+    return {
+      state: 'today',
+      isGlow: true,
+      badgeText: 'Today',
+      formattedDate,
+      tMinusText,
+      shortTitle,
+    };
+  }
+
+  // Find next upcoming uncompleted milestone ID
+  const todayStart = new Date(
+    now.getFullYear(),
+    now.getMonth(),
+    now.getDate()
+  ).getTime();
+
+  const nextUpcoming = allSortedMilestones.find((m) => {
+    if (m.completed) return false;
+    const mDate = new Date(m.targetDate);
+    return !Number.isNaN(mDate.getTime()) && mDate.getTime() >= todayStart;
+  });
+
+  const isNextUpcoming = nextUpcoming ? nextUpcoming.id === milestone.id : false;
+
+  if (isNextUpcoming) {
+    return {
+      state: 'upcoming',
+      isGlow: true,
+      badgeText: 'Next Up',
+      formattedDate,
+      tMinusText,
+      shortTitle,
+    };
+  }
+
+  // Check if past
+  const isPast = isValidDate && parsedDate.getTime() < now.getTime();
+  if (isPast) {
+    return {
+      state: 'past',
+      isGlow: false,
+      formattedDate,
+      tMinusText,
+      shortTitle,
+    };
+  }
+
+  // Otherwise future
+  return {
+    state: 'future',
+    isGlow: false,
+    formattedDate,
+    tMinusText,
+    shortTitle,
+  };
+}
+
 
 /**
  * Returns 4 to 5 concise Christmas preparation milestones sorted in strict chronological order

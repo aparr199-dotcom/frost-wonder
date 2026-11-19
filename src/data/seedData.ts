@@ -2,6 +2,7 @@ import { ChildProfile, GiftItem, HolidayMilestone } from '../types/holiday';
 
 export const GENERATED_ASSETS = {
   heroIcePalace: '/assets/images/hero_ice_palace.jpg',
+  snowGlobeCottage: '/assets/images/snow_globe_cottage.jpg',
   avatars: {
     owl: '/assets/images/avatar_snow_owl.jpg',
     fox: '/assets/images/avatar_arctic_fox.jpg',
@@ -43,47 +44,52 @@ export const AVATAR_METADATA: Record<
 export function getInitialMilestones(targetYear: number): HolidayMilestone[] {
   return [
     {
-      id: 'ms-tree-lights',
-      title: 'Tree & Winter Lights Evening',
-      targetDate: `${targetYear}-11-29T17:00`,
-      icon: 'tree',
-      category: 'Step 01 · Home Tradition',
+      id: 't-14-gift-lists',
+      tMinusLabel: 'T–14',
+      title: 'Finalize Christmas gift lists',
+      targetDate: `${targetYear}-12-11T20:00`,
+      icon: 'star',
+      category: 'Milestone 01',
       completed: false,
-      notes: '26 days before Christmas — Hang ornaments, warm lights, and finalize holiday plans.',
+      notes: '14 days before Christmas — Finalize Christmas gift lists',
       order: 0,
     },
     {
-      id: 'ms-shipping-cutoff',
-      title: 'Holiday Shipping Cutoff',
-      targetDate: `${targetYear}-12-14T20:00`,
+      id: 't-7-holiday-shopping',
+      tMinusLabel: 'T–7',
+      title: 'Finish holiday shopping',
+      targetDate: `${targetYear}-12-18T20:00`,
       icon: 'shopping',
-      category: 'Step 02 · Parcel Deadline',
+      category: 'Milestone 02',
       completed: false,
-      notes: '11 days before Christmas — Final deadline for standard delivery before Christmas Eve.',
+      notes: '7 days before Christmas — Finish holiday shopping',
       order: 1,
     },
     {
-      id: 'ms-wrapping-night',
-      title: 'Wrapping & Ribbon Night',
-      targetDate: `${targetYear}-12-21T20:00`,
+      id: 't-3-wrap-gifts',
+      tMinusLabel: 'T–3',
+      title: 'Wrap gifts and prepare',
+      targetDate: `${targetYear}-12-22T20:00`,
       icon: 'gift',
-      category: 'Step 03 · Finishing Touches',
+      category: 'Milestone 03',
       completed: false,
-      notes: '4 days before Christmas — Wrap gifts, tie ribbons, and write holiday cards.',
+      notes: '3 days before Christmas — Wrap gifts and prepare',
       order: 2,
     },
     {
-      id: 'ms-christmas-eve',
-      title: 'Christmas Eve Hearth & Magic',
-      targetDate: `${targetYear}-12-24T21:00`,
-      icon: 'sleigh',
-      category: 'Step 04 · Final Staging',
+      id: 't-1-final-prep',
+      tMinusLabel: 'T–1',
+      title: 'Complete final preparations',
+      targetDate: `${targetYear}-12-24T20:00`,
+      icon: 'tree',
+      category: 'Milestone 04',
       completed: false,
-      notes: '1 day before Christmas — Stage gifts under the tree and enjoy warm cocoa by the hearth.',
+      notes: '1 day before Christmas — Complete final Christmas preparations',
       order: 3,
     },
   ];
 }
+
 
 /**
  * Real family workspace starts completely clean and empty so private users

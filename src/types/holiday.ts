@@ -70,6 +70,7 @@ export type MilestoneIconType =
 export interface HolidayMilestone {
   id: string;
   title: string;
+  tMinusLabel?: string; // e.g. 'T–14', 'T–7', 'T–3', 'T–1'
   targetDate: string; // ISO string or YYYY-MM-DDTHH:mm
   icon: MilestoneIconType;
   category: string;
@@ -182,7 +183,10 @@ export interface MilestoneReminderRecord {
   verifiedAt: string;
 }
 
-export type WallpaperResolutionId = 'qhd_2560x1440' | 'uhd_3840x2160';
+export type WallpaperResolutionId =
+  | 'qhd_2560x1440'
+  | 'uhd_3840x2160'
+  | 'mobile_1290x2796';
 
 export interface WallpaperResolutionSpec {
   id: WallpaperResolutionId;
@@ -190,7 +194,8 @@ export interface WallpaperResolutionSpec {
   height: number;
   shortLabel: string;
   technicalLabel: string;
-  aspectRatio: '16:9';
+  aspectRatio: '16:9' | '19.5:9';
 }
+
 
 

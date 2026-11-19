@@ -459,5 +459,97 @@ test('generateMilestoneIcsContent produces valid RFC 5545 VCALENDAR with VALARM 
   assert.ok(ics.includes('END:VCALENDAR'));
 });
 
+test('getMilestoneDisplayStatus automatically highlights the next upcoming milestone and advances when date passes or completed', () => {
+  const msList: HolidayMilestone[] = [
+    {
+      id: 't-14-gift-lists',
+      tMinusLabel: 'T–14',
+      title: 'Finalize Christmas gift lists',
+      targetDate: '2026-12-11T20:00',
+      icon: 'star',
+      category: 'Milestone 01',
+      completed: false,
+      order: 0,
+    },
+    {
+      id: 't-7-holiday-shopping',
+      tMinusLabel: 'T–7',
+      title: 'Finish holiday shopping',
+      targetDate: '2026-12-18T20:00',
+      icon: 'shopping',
+      category: 'Milestone 02',
+      completed: false,
+      order: 1,
+    },
+    {
+      id: 't-3-wrap-gifts',
+      tMinusLabel: 'T–3',
+      title: 'Wrap gifts and prepare',
+      targetDate: '2026-12-22T20:00',
+      icon: 'gift',
+      category: 'Milestone 03',
+      completed: false,
+      order: 2,
+    },
+    {
+      id: 't-1-final-prep',
+      tMinusLabel: 'T–1',
+      title: 'Complete final preparations',
+      targetDate: '2026-12-24T20:00',
+      icon: 'tree',
+      category: 'Milestone 04',
+      completed: false,
+      order: 3,
+    },
+  ];
+
+  // Test 1: On Nov 19, 2026 -> T-14 is the next upcoming milestone (glows with Next Up badge)
+  const nov19 = new Date(2026, 10, 19, 12, 0, 0);
+  const statusT14 = getMilestoneDisplayStatus(msList[0], nov19, msList);
+  assert.equal(statusT14.state, 'upcoming');
+  assert.equal(statusT14.isGlow, true);
+  assert.equal(statusT14.badgeText, 'Next Up');
+  assert.equal(statusT14.tMinusText, 'T–14');
+
+  const statusT7 = getMilestoneDisplayStatus(msList[1], nov19, msList);
+  assert.equal(statusT7.state, 'future');
+  assert.equal(statusT7.isGlow, false);
+
+  // Test 2: On Dec 11, 2026 (today) -> T-14 is today with Today badge
+  const dec11 = new Date(2026, 11, 11, 10, 0, 0);
+  const statusDec11 = getMilestoneDisplayStatus(msList[0], dec11, msList);
+  assert.equal(statusDec11.state, 'today');
+  assert.equal(statusDec11.isGlow, true);
+  assert.equal(statusDec11.badgeText, 'Today');
+
+  // Test 3: On Dec 12, 2026 (after Dec 11 passes) -> T-14 is past, T-7 automatically becomes upcoming!
+  const dec12 = new Date(2026, 11, 12, 10, 0, 0);
+  const statusT14Past = getMilestoneDisplayStatus(msList[0], dec12, msList);
+  assert.equal(statusT14Past.state, 'past');
+  assert.equal(statusT14Past.isGlow, false);
+
+  const statusT7Upcoming = getMilestoneDisplayStatus(msList[1], dec12, msList);
+  assert.equal(statusT7Upcoming.state, 'upcoming');
+  assert.equal(statusT7Upcoming.isGlow, true);
+  assert.equal(statusT7Upcoming.badgeText, 'Next Up');
+
+  // Test 4: When T-14 is manually marked completed on Nov 19 -> T-14 is completed, T-7 glows
+  const msCompleted: HolidayMilestone[] = [
+    { ...msList[0], completed: true },
+    msList[1],
+    msList[2],
+    msList[3],
+  ];
+  const statusCompleted = getMilestoneDisplayStatus(msCompleted[0], nov19, msCompleted);
+  assert.equal(statusCompleted.state, 'completed');
+  assert.equal(statusCompleted.isGlow, false);
+
+  const statusT7AfterComplete = getMilestoneDisplayStatus(msCompleted[1], nov19, msCompleted);
+  assert.equal(statusT7AfterComplete.state, 'upcoming');
+  assert.equal(statusT7AfterComplete.isGlow, true);
+  assert.equal(statusT7AfterComplete.badgeText, 'Next Up');
+});
+
+
 
 

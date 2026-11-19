@@ -4,7 +4,14 @@ import {
   Check,
   Download,
   Eye,
+  Gift,
+  Info,
+  Maximize2,
+  Minimize2,
+  ShoppingBag,
   Sparkles,
+  Star,
+  TreePine,
   X,
 } from 'lucide-react';
 import {
@@ -15,17 +22,18 @@ import {
 import {
   calculateChristmasCountdown,
   generateMilestoneIcsContent,
-  getChronologicalLockScreenMilestones,
+  getMilestoneDisplayStatus,
   WALLPAPER_RESOLUTIONS,
 } from './utils/holidayLogic';
 import { GENERATED_ASSETS, getInitialMilestones } from './data/seedData';
 import { SnowfallCanvas } from './components/SnowfallCanvas';
 import { renderLockScreenToCanvas } from './utils/lockScreenWallpaperRenderer';
+import { usePWAInstall } from './hooks/usePWAInstall';
 
 const STORAGE_KEYS = {
-  milestones: 'frost_wonder_minimal_v3_milestones',
-  milestoneCount: 'frost_wonder_minimal_v3_count',
-  showSnowGlobe: 'frost_wonder_minimal_v3_globe',
+  milestones: 'frost_wonder_v4_milestones',
+  snowEnabled: 'frost_wonder_v4_snow',
+  widgetMode: 'frost_wonder_v4_widget',
 };
 
 function loadFromStorage<T>(key: string, fallback: T): T {
@@ -39,91 +47,117 @@ function loadFromStorage<T>(key: string, fallback: T): T {
   }
 }
 
-function formatShortMilestoneTitle(rawTitle: string): string {
-  return rawTitle
-    .replace(/\s+Evening$/i, '')
-    .replace(/\s+Hearth\s*&\s*Magic$/i, '')
-    .replace(/^Time to Decorate the\s+/i, '')
-    .replace(/^Holiday\s+/i, '')
-    .replace(/\s+&\s+Ribbon\s+/i, ' ')
-    .trim();
-}
-
 export default function App() {
+  // Live ticking date state (updated every 1 second)
   const [now, setNow] = useState<Date>(() => new Date());
-  const [snowEnabled, setSnowEnabled] = useState<boolean>(true);
+
+  // Check URL param ?widget=true or stored preference
+  const [widgetMode, setWidgetMode] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get('widget') === 'true') return true;
+    }
+    return loadFromStorage<boolean>(STORAGE_KEYS.widgetMode, false);
+  });
+
+  const [snowEnabled, setSnowEnabled] = useState<boolean>(() =>
+    loadFromStorage<boolean>(STORAGE_KEYS.snowEnabled, true)
+  );
+
   const [showMacClock, setShowMacClock] = useState<boolean>(false);
-  const [showSnowGlobe, setShowSnowGlobe] = useState<boolean>(() =>
-    loadFromStorage<boolean>(STORAGE_KEYS.showSnowGlobe, true)
-  );
-  const [milestoneCount, setMilestoneCount] = useState<3 | 4>(() =>
-    loadFromStorage<3 | 4>(STORAGE_KEYS.milestoneCount, 4)
-  );
+
+  // 4 Preloaded T-Minus Milestones (stored in localStorage so manual completion survives reloads)
   const [milestones, setMilestones] = useState<HolidayMilestone[]>(() =>
     loadFromStorage<HolidayMilestone[]>(
       STORAGE_KEYS.milestones,
       getInitialMilestones(2026)
     )
   );
+
   const [selectedResolution, setSelectedResolution] =
     useState<WallpaperResolutionId>('qhd_2560x1440');
 
-  // Lightweight modal states (only opened on user action)
-  const [editingMilestone, setEditingMilestone] =
-    useState<HolidayMilestone | null>(null);
-  const [draftTitle, setDraftTitle] = useState<string>('');
-  const [draftDate, setDraftDate] = useState<string>('');
-  const [exportedPngPreviewUrl, setExportedPngPreviewUrl] = useState<
-    string | null
-  >(null);
+  // Modals
+  const [showAiPlanModal, setShowAiPlanModal] = useState<boolean>(false);
+  const [showPwaModal, setShowPwaModal] = useState<boolean>(false);
+  const [exportedPngPreviewUrl, setExportedPngPreviewUrl] = useState<string | null>(null);
   const [statusToast, setStatusToast] = useState<string | null>(null);
 
+  // Images for wallpaper rendering
   const heroImageRef = useRef<HTMLImageElement | null>(null);
-  const [heroImageReady, setHeroImageReady] = useState<boolean>(false);
-  const globeCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const snowGlobeImageRef = useRef<HTMLImageElement | null>(null);
+  const [imagesLoaded, setImagesLoaded] = useState<boolean>(false);
 
-  useEffect(() => {
-    const timer = window.setInterval(() => setNow(new Date()), 10000);
-    return () => window.clearInterval(timer);
-  }, []);
+  // Interactive swirling snow for the snow globe
+  const [isSwirling, setIsSwirling] = useState<boolean>(false);
+  const swirlTimeoutRef = useRef<number | null>(null);
 
+  const { isInstallable, isInstalled, isIOS, isMacSafari, install } = usePWAInstall();
+
+  // 1. Live countdown: Update every 1 second
   useEffect(() => {
-    const img = new Image();
-    img.crossOrigin = 'anonymous';
-    img.onload = () => {
-      heroImageRef.current = img;
-      setHeroImageReady(true);
+    const timer = window.setInterval(() => {
+      setNow(new Date());
+    }, 1000);
+
+    // Recalculate immediately when device wakes from sleep or tab becomes active
+    const handleVisibilityOrFocus = () => {
+      setNow(new Date());
     };
-    img.src = GENERATED_ASSETS.heroIcePalace;
+
+    document.addEventListener('visibilitychange', handleVisibilityOrFocus);
+    window.addEventListener('focus', handleVisibilityOrFocus);
+
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener('visibilitychange', handleVisibilityOrFocus);
+      window.removeEventListener('focus', handleVisibilityOrFocus);
+    };
   }, []);
 
+  // Preload background & snow globe cottage images for rendering
+  useEffect(() => {
+    let loadedCount = 0;
+    const checkReady = () => {
+      loadedCount++;
+      if (loadedCount >= 2) setImagesLoaded(true);
+    };
+
+    const heroImg = new Image();
+    heroImg.crossOrigin = 'anonymous';
+    heroImg.onload = checkReady;
+    heroImg.onerror = checkReady;
+    heroImg.src = GENERATED_ASSETS.heroIcePalace;
+    heroImageRef.current = heroImg;
+
+    const globeImg = new Image();
+    globeImg.crossOrigin = 'anonymous';
+    globeImg.onload = checkReady;
+    globeImg.onerror = checkReady;
+    globeImg.src = GENERATED_ASSETS.snowGlobeCottage;
+    snowGlobeImageRef.current = globeImg;
+  }, []);
+
+  // Sync state to localStorage
   useEffect(() => {
     try {
-      window.localStorage.setItem(
-        STORAGE_KEYS.milestones,
-        JSON.stringify(milestones)
-      );
+      window.localStorage.setItem(STORAGE_KEYS.milestones, JSON.stringify(milestones));
     } catch {}
   }, [milestones]);
 
   useEffect(() => {
     try {
-      window.localStorage.setItem(
-        STORAGE_KEYS.milestoneCount,
-        JSON.stringify(milestoneCount)
-      );
+      window.localStorage.setItem(STORAGE_KEYS.snowEnabled, JSON.stringify(snowEnabled));
     } catch {}
-  }, [milestoneCount]);
+  }, [snowEnabled]);
 
   useEffect(() => {
     try {
-      window.localStorage.setItem(
-        STORAGE_KEYS.showSnowGlobe,
-        JSON.stringify(showSnowGlobe)
-      );
+      window.localStorage.setItem(STORAGE_KEYS.widgetMode, JSON.stringify(widgetMode));
     } catch {}
-  }, [showSnowGlobe]);
+  }, [widgetMode]);
 
+  // Calculate Christmas Countdown state targeting December 25, 2026 local time
   const countdown: CountdownState = useMemo(
     () =>
       calculateChristmasCountdown(now, {
@@ -132,336 +166,45 @@ export default function App() {
     [now]
   );
 
-  const visibleMilestones = useMemo(
+  // Sorted 4 Milestones
+  const sortedMilestones = useMemo(
     () =>
-      getChronologicalLockScreenMilestones(
-        milestones,
-        countdown.targetYear,
-        milestoneCount
+      [...milestones].sort(
+        (a, b) => new Date(a.targetDate).getTime() - new Date(b.targetDate).getTime()
       ),
-    [milestones, countdown.targetYear, milestoneCount]
+    [milestones]
   );
 
+  // Dynamic Browser Tab Title
   useEffect(() => {
-    const dayWord = countdown.days === 1 ? 'Day' : 'Days';
-    document.title = `Frost & Wonder — ${countdown.days} ${dayWord} Until Christmas`;
-  }, [countdown.days]);
-
-  // Draw the simple, jewel-like snow globe on the live lock screen when enabled
-  useEffect(() => {
-    if (!showSnowGlobe || !globeCanvasRef.current) return;
-    const canvas = globeCanvasRef.current;
-    const size = 520;
-    canvas.width = size;
-    canvas.height = size;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    const cx = size / 2;
-    const cy = 228;
-    const r = 178;
-
-    ctx.clearRect(0, 0, size, size);
-
-    // Soft outer icy-lavender glow
-    const halo = ctx.createRadialGradient(cx, cy, r * 0.4, cx, cy, r * 1.38);
-    halo.addColorStop(0, 'rgba(56, 189, 248, 0.34)');
-    halo.addColorStop(0.55, 'rgba(167, 139, 250, 0.18)');
-    halo.addColorStop(1, 'rgba(6, 12, 28, 0)');
-    ctx.fillStyle = halo;
-    ctx.beginPath();
-    ctx.arc(cx, cy, r * 1.38, 0, Math.PI * 2);
-    ctx.fill();
-
-    // Clip interior of crystal dome
-    ctx.save();
-    ctx.beginPath();
-    ctx.arc(cx, cy, r, 0, Math.PI * 2);
-    ctx.clip();
-
-    const domeSky = ctx.createRadialGradient(cx, cy - 22, 12, cx, cy, r);
-    domeSky.addColorStop(0, '#1e3a8a');
-    domeSky.addColorStop(0.45, '#0369a1');
-    domeSky.addColorStop(0.8, '#082f49');
-    domeSky.addColorStop(1, '#020b1c');
-    ctx.fillStyle = domeSky;
-    ctx.fillRect(cx - r, cy - r, r * 2, r * 2);
-
-    const horizonY = cy + 54;
-
-    // Illuminated Ferris Wheel inside snow globe
-    const wheelCx = cx - 24;
-    const wheelCy = horizonY - 82;
-    const wheelR = 68;
-
-    ctx.strokeStyle = 'rgba(186, 230, 253, 0.6)';
-    ctx.lineWidth = 1.8;
-    ctx.beginPath();
-    ctx.moveTo(wheelCx - 30, horizonY);
-    ctx.lineTo(wheelCx, wheelCy);
-    ctx.lineTo(wheelCx + 30, horizonY);
-    ctx.stroke();
-
-    ctx.strokeStyle = 'rgba(240, 249, 255, 0.9)';
-    ctx.lineWidth = 1.8;
-    ctx.beginPath();
-    ctx.arc(wheelCx, wheelCy, wheelR, 0, Math.PI * 2);
-    ctx.stroke();
-
-    ctx.strokeStyle = 'rgba(186, 230, 253, 0.72)';
-    ctx.lineWidth = 1.2;
-    ctx.beginPath();
-    ctx.arc(wheelCx, wheelCy, wheelR * 0.76, 0, Math.PI * 2);
-    ctx.stroke();
-
-    for (let i = 0; i < 16; i++) {
-      const angle = (i * Math.PI * 2) / 16;
-      const gx = wheelCx + Math.cos(angle) * wheelR;
-      const gy = wheelCy + Math.sin(angle) * wheelR;
-      ctx.strokeStyle = 'rgba(224, 242, 254, 0.7)';
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(wheelCx, wheelCy);
-      ctx.lineTo(gx, gy);
-      ctx.stroke();
-
-      ctx.fillStyle = '#fef08a';
-      ctx.beginPath();
-      ctx.arc(gx, gy, 3, 0, Math.PI * 2);
-      ctx.fill();
+    if (countdown.isChristmasMorning) {
+      document.title = '✦ Merry Christmas! ✦ — Frost & Wonder';
+    } else {
+      document.title = `✦ ${countdown.days}d ${countdown.hours}h ${countdown.minutes}m ${countdown.seconds}s — Frost & Wonder`;
     }
-
-    ctx.fillStyle = '#fef08a';
-    ctx.beginPath();
-    ctx.arc(wheelCx, wheelCy, 5, 0, Math.PI * 2);
-    ctx.fill();
-
-    // Snow-laden evergreens
-    const drawPine = (dx: number, tw: number, th: number) => {
-      const tx = cx + dx;
-      const baseY = horizonY + 4;
-      for (let tier = 0; tier < 3; tier++) {
-        const p = tier / 3;
-        const botY = baseY - p * (th * 0.58);
-        const topY = baseY - (p + 0.45) * th * 0.95;
-        const halfW = (tw * (1 - p * 0.25)) / 2;
-        ctx.fillStyle = '#0a2e36';
-        ctx.beginPath();
-        ctx.moveTo(tx - halfW, botY);
-        ctx.lineTo(tx, topY);
-        ctx.lineTo(tx + halfW, botY);
-        ctx.closePath();
-        ctx.fill();
-
-        ctx.fillStyle = '#e0f2fe';
-        ctx.beginPath();
-        ctx.moveTo(tx - halfW * 0.76, botY - (botY - topY) * 0.34);
-        ctx.lineTo(tx, topY);
-        ctx.lineTo(tx + halfW * 0.76, botY - (botY - topY) * 0.34);
-        ctx.closePath();
-        ctx.fill();
-      }
-    };
-
-    [
-      { dx: -122, w: 40, h: 76 },
-      { dx: -96, w: 46, h: 92 },
-      { dx: -72, w: 36, h: 68 },
-      { dx: 84, w: 38, h: 74 },
-      { dx: 106, w: 46, h: 94 },
-      { dx: 128, w: 36, h: 70 },
-    ].forEach((t) => drawPine(t.dx, t.w, t.h));
-
-    // Warm-lit alpine castle towers & cottages
-    const drawTower = (dx: number, w: number, h: number, roofH: number) => {
-      const bx = cx + dx;
-      const topY = horizonY - h;
-      const wallGrad = ctx.createLinearGradient(bx - w / 2, topY, bx + w / 2, horizonY);
-      wallGrad.addColorStop(0, '#f8fafc');
-      wallGrad.addColorStop(0.5, '#fed7aa');
-      wallGrad.addColorStop(1, '#f97316');
-      ctx.fillStyle = wallGrad;
-      ctx.strokeStyle = 'rgba(224, 242, 254, 0.9)';
-      ctx.lineWidth = 1.2;
-      ctx.beginPath();
-      ctx.rect(bx - w / 2, topY, w, h);
-      ctx.fill();
-      ctx.stroke();
-
-      ctx.fillStyle = '#38bdf8';
-      ctx.beginPath();
-      ctx.moveTo(bx - w / 2 - 3, topY);
-      ctx.lineTo(bx, topY - roofH);
-      ctx.lineTo(bx + w / 2 + 3, topY);
-      ctx.closePath();
-      ctx.fill();
-      ctx.stroke();
-
-      ctx.fillStyle = '#fef08a';
-      ctx.beginPath();
-      ctx.roundRect(bx - 4.5, horizonY - h * 0.62, 9, 13, 3);
-      ctx.roundRect(bx - 5.5, horizonY - 20, 11, 18, 4);
-      ctx.fill();
-    };
-
-    drawTower(-54, 26, 30, 14);
-    drawTower(-30, 24, 54, 22);
-    drawTower(-4, 34, 46, 18);
-    drawTower(24, 28, 78, 28);
-    drawTower(54, 34, 98, 32);
-    drawTower(80, 22, 46, 18);
-
-    // Luminous cyan-blue snowbowl base
-    const bowlGrad = ctx.createLinearGradient(cx, horizonY - 3, cx, cy + r);
-    bowlGrad.addColorStop(0, '#ffffff');
-    bowlGrad.addColorStop(0.22, '#bae6fd');
-    bowlGrad.addColorStop(0.55, '#0ea5e9');
-    bowlGrad.addColorStop(1, '#04132c');
-    ctx.fillStyle = bowlGrad;
-    ctx.fillRect(cx - r, horizonY, r * 2, r);
-
-    // Floating snowflakes inside dome
-    for (let s = 0; s < 52; s++) {
-      const angle = s * 1.65;
-      const dist = (s * 23) % 158;
-      const sx = cx + Math.cos(angle) * dist;
-      const sy = cy + Math.sin(angle * 1.25) * dist * 0.86;
-      ctx.fillStyle =
-        s % 5 === 0
-          ? 'rgba(254, 240, 138, 0.85)'
-          : 'rgba(255, 255, 255, 0.82)';
-      ctx.beginPath();
-      ctx.arc(sx, sy, (s % 3) + 1.3, 0, Math.PI * 2);
-      ctx.fill();
-    }
-
-    // Crescent glass highlight
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.55)';
-    ctx.lineWidth = 5.5;
-    ctx.lineCap = 'round';
-    ctx.beginPath();
-    ctx.arc(cx, cy, r - 11, Math.PI * 1.05, Math.PI * 1.45);
-    ctx.stroke();
-    ctx.restore();
-
-    ctx.strokeStyle = 'rgba(224, 242, 254, 0.82)';
-    ctx.lineWidth = 2.2;
-    ctx.beginPath();
-    ctx.arc(cx, cy, r, 0, Math.PI * 2);
-    ctx.stroke();
-
-    // Midnight-blue porcelain & gold filigree pedestal
-    const neckY = cy + r - 13;
-    const baseBottomY = neckY + 76;
-    const topHalfW = 124;
-    const bottomHalfW = 162;
-
-    const pedGrad = ctx.createLinearGradient(
-      cx - bottomHalfW,
-      neckY,
-      cx + bottomHalfW,
-      baseBottomY
-    );
-    pedGrad.addColorStop(0, '#020714');
-    pedGrad.addColorStop(0.28, '#0a1d42');
-    pedGrad.addColorStop(0.5, '#1d4ed8');
-    pedGrad.addColorStop(0.72, '#0a1d42');
-    pedGrad.addColorStop(1, '#020612');
-
-    ctx.fillStyle = pedGrad;
-    ctx.strokeStyle = '#fbbf24';
-    ctx.lineWidth = 1.6;
-    ctx.beginPath();
-    ctx.moveTo(cx - topHalfW, neckY);
-    ctx.quadraticCurveTo(cx, neckY + 11, cx + topHalfW, neckY);
-    ctx.lineTo(cx + bottomHalfW, baseBottomY);
-    ctx.quadraticCurveTo(cx, baseBottomY + 14, cx - bottomHalfW, baseBottomY);
-    ctx.closePath();
-    ctx.fill();
-    ctx.stroke();
-
-    ctx.fillStyle = '#fde047';
-    for (let b = 0; b <= 30; b++) {
-      const t = b / 30;
-      const bx = cx - topHalfW * 0.95 + t * topHalfW * 1.9;
-      const by = neckY + 10 + Math.sin(t * Math.PI) * 7;
-      ctx.beginPath();
-      ctx.arc(bx, by, 1.8, 0, Math.PI * 2);
-      ctx.fill();
-    }
-    for (let b = 0; b <= 38; b++) {
-      const t = b / 38;
-      const bx = cx - bottomHalfW * 0.95 + t * bottomHalfW * 1.9;
-      const by = baseBottomY - 3 + Math.sin(t * Math.PI) * 10;
-      ctx.beginPath();
-      ctx.arc(bx, by, 2, 0, Math.PI * 2);
-      ctx.fill();
-    }
-
-    [-1, 1].forEach((dir) => {
-      ctx.save();
-      ctx.translate(cx, neckY + 42);
-      ctx.scale(dir, 1);
-      ctx.strokeStyle = '#fbbf24';
-      ctx.lineWidth = 1.6;
-      ctx.lineCap = 'round';
-      ctx.beginPath();
-      ctx.moveTo(13, 5);
-      ctx.bezierCurveTo(45, -13, 84, 15, 130, -4);
-      ctx.stroke();
-
-      ctx.beginPath();
-      ctx.moveTo(48, -2);
-      ctx.quadraticCurveTo(76, -18, 104, -12);
-      ctx.stroke();
-
-      ctx.fillStyle = '#fde68a';
-      [
-        { x: 30, y: -2, a: -0.45, rx: 6.5, ry: 2.4 },
-        { x: 46, y: 6, a: 0.4, rx: 7, ry: 2.5 },
-        { x: 68, y: -10, a: -0.5, rx: 6, ry: 2.2 },
-        { x: 82, y: 4, a: 0.35, rx: 7.2, ry: 2.5 },
-        { x: 100, y: -13, a: -0.3, rx: 6, ry: 2.2 },
-        { x: 114, y: 2, a: 0.25, rx: 6.8, ry: 2.4 },
-      ].forEach((lf) => {
-        ctx.save();
-        ctx.translate(lf.x, lf.y);
-        ctx.rotate(lf.a);
-        ctx.beginPath();
-        ctx.ellipse(0, 0, lf.rx, lf.ry, 0, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.restore();
-      });
-      ctx.restore();
-    });
-
-    ctx.fillStyle = '#fef08a';
-    ctx.beginPath();
-    ctx.arc(cx, neckY + 44, 3.4, 0, Math.PI * 2);
-    ctx.fill();
-
-    const snowbankGrad = ctx.createLinearGradient(
-      cx,
-      baseBottomY - 5,
-      cx,
-      baseBottomY + 22
-    );
-    snowbankGrad.addColorStop(0, '#ffffff');
-    snowbankGrad.addColorStop(0.55, '#bae6fd');
-    snowbankGrad.addColorStop(1, 'rgba(7, 18, 42, 0)');
-    ctx.fillStyle = snowbankGrad;
-    ctx.beginPath();
-    ctx.ellipse(cx - 120, baseBottomY + 6, 76, 11, 0, 0, Math.PI * 2);
-    ctx.ellipse(cx + 120, baseBottomY + 6, 76, 11, 0, 0, Math.PI * 2);
-    ctx.ellipse(cx, baseBottomY + 9, 142, 10, 0, 0, Math.PI * 2);
-    ctx.fill();
-  }, [showSnowGlobe]);
+  }, [countdown]);
 
   const showToast = (msg: string) => {
     setStatusToast(msg);
     window.setTimeout(() => {
       setStatusToast((prev) => (prev === msg ? null : prev));
-    }, 6500);
+    }, 6000);
+  };
+
+  // Toggle manual completion of a milestone
+  const handleToggleMilestoneDone = (id: string) => {
+    setMilestones((prev) =>
+      prev.map((m) => (m.id === id ? { ...m, completed: !m.completed } : m))
+    );
+  };
+
+  // Trigger swirling snow inside the snow globe on interaction
+  const triggerSnowSwirl = () => {
+    setIsSwirling(true);
+    if (swirlTimeoutRef.current) window.clearTimeout(swirlTimeoutRef.current);
+    swirlTimeoutRef.current = window.setTimeout(() => {
+      setIsSwirling(false);
+    }, 2800);
   };
 
   // Generate High-Resolution Wallpaper PNG Data URL
@@ -476,12 +219,12 @@ export default function App() {
       width: spec.width,
       height: spec.height,
       countdown,
-      milestones,
+      milestones: sortedMilestones,
       now,
       heroImage: heroImageRef.current,
+      snowGlobeImage: snowGlobeImageRef.current,
       includeSimulatedMacClockOverlay: withClockOverlay,
-      includeSnowGlobe: showSnowGlobe,
-      milestoneCount,
+      includeSnowGlobe: true,
     });
     return exportCanvas.toDataURL('image/png');
   };
@@ -493,6 +236,8 @@ export default function App() {
     const resTag =
       selectedResolution === 'uhd_3840x2160'
         ? '3840x2160-4K'
+        : selectedResolution === 'mobile_1290x2796'
+        ? '1290x2796-Mobile'
         : '2560x1440-QHD';
     link.download = `Frost-and-Wonder-Lock-Screen-${resTag}.png`;
     link.href = dataUrl;
@@ -500,7 +245,7 @@ export default function App() {
 
     setExportedPngPreviewUrl(dataUrl);
     showToast(
-      `Downloaded ${spec.shortLabel} Lock-Screen Wallpaper (.PNG). Static image snapshot—set as your macOS Lock Screen wallpaper.`
+      `Downloaded ${spec.shortLabel} Lock-Screen Wallpaper (.PNG). Static image snapshot—set as your lock-screen wallpaper.`
     );
   };
 
@@ -509,58 +254,19 @@ export default function App() {
     setExportedPngPreviewUrl(dataUrl);
   };
 
-  // Honest Optional .ICS Calendar Reminder Export
-  const handleExportIcsReminders = (targetList: HolidayMilestone[]) => {
-    if (targetList.length === 0) return;
-    const icsContent = generateMilestoneIcsContent(targetList, 24);
-    const blob = new Blob([icsContent], {
-      type: 'text/calendar;charset=utf-8',
-    });
+  // Download .ICS Reminder File
+  const handleExportIcsReminders = () => {
+    const icsContent = generateMilestoneIcsContent(sortedMilestones, 24);
+    const blob = new Blob([icsContent], { type: 'text/calendar;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download =
-      targetList.length === 1
-        ? `Frost-and-Wonder-${targetList[0].title
-            .toLowerCase()
-            .replace(/[^a-z0-9]+/g, '-')}.ics`
-        : `Frost-and-Wonder-Christmas-Milestones.ics`;
+    a.download = 'Frost-and-Wonder-Christmas-Milestones.ics';
     a.click();
     URL.revokeObjectURL(url);
 
     showToast(
-      `Downloaded .ICS calendar file (${targetList.length} milestone${
-        targetList.length > 1 ? 's' : ''
-      }). Note: Downloading an .ICS file does not schedule a reminder automatically—open and import the file in Apple Calendar to activate alerts.`
-    );
-  };
-
-  const openEditMilestone = (ms: HolidayMilestone) => {
-    setEditingMilestone(ms);
-    setDraftTitle(ms.title);
-    setDraftDate(ms.targetDate);
-  };
-
-  const handleSaveMilestone = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!editingMilestone || !draftTitle.trim()) return;
-    setMilestones((prev) =>
-      prev.map((m) =>
-        m.id === editingMilestone.id
-          ? {
-              ...m,
-              title: draftTitle.trim(),
-              targetDate: draftDate,
-            }
-          : m
-      )
-    );
-    setEditingMilestone(null);
-  };
-
-  const handleToggleMilestoneDone = (id: string) => {
-    setMilestones((prev) =>
-      prev.map((m) => (m.id === id ? { ...m, completed: !m.completed } : m))
+      'Downloaded .ICS calendar file (4 milestones). Open and import the file in Apple Calendar or Google Calendar to activate reminders.'
     );
   };
 
@@ -570,362 +276,529 @@ export default function App() {
     day: 'numeric',
   });
 
-  const dayWord = countdown.days === 1 ? 'Day' : 'Days';
+  const getMilestoneIcon = (icon: string) => {
+    switch (icon) {
+      case 'star':
+        return <Star className="h-4 w-4 text-amber-300" />;
+      case 'shopping':
+        return <ShoppingBag className="h-4 w-4 text-sky-300" />;
+      case 'gift':
+        return <Gift className="h-4 w-4 text-indigo-300" />;
+      case 'tree':
+      default:
+        return <TreePine className="h-4 w-4 text-emerald-300" />;
+    }
+  };
 
   return (
-    <div className="relative flex min-h-screen w-full flex-col justify-between overflow-hidden bg-[#040919] text-slate-100 select-none">
+    <div
+      className={`relative flex min-h-screen w-full flex-col justify-between overflow-x-hidden bg-[#020718] text-slate-100 select-none ${
+        widgetMode ? 'p-2 sm:p-4' : ''
+      }`}
+    >
       {/* Full-Screen Winter Background */}
-      <div className="pointer-events-none absolute inset-0 z-0">
+      <div className="pointer-events-none fixed inset-0 z-0">
         <img
           src={GENERATED_ASSETS.heroIcePalace}
           alt="Enchanted Winter Ice Palace Background"
           referrerPolicy="no-referrer"
-          className="h-full w-full object-cover object-center opacity-80"
+          className="h-full w-full object-cover object-center opacity-70"
         />
-        <div className="absolute inset-0 bg-gradient-to-b from-[#040918]/50 via-[#06122c]/20 to-[#030714]/90" />
-        <div className="animate-aurora absolute left-1/4 top-1/4 h-96 w-1/2 rounded-full bg-gradient-to-r from-sky-400/20 via-indigo-400/15 to-amber-200/10 blur-3xl" />
+        <div className="absolute inset-0 bg-gradient-to-b from-[#020718]/60 via-[#05143a]/40 to-[#020718]/95" />
+        <div className="animate-aurora absolute left-1/4 top-1/4 h-96 w-1/2 rounded-full bg-gradient-to-r from-sky-400/25 via-purple-500/20 to-amber-200/10 blur-3xl" />
       </div>
 
-      {/* Optional Subtle Falling Snow */}
+      {/* Falling Snow Canvas */}
       <SnowfallCanvas
         intensity={countdown.magicIntensity}
         isChristmasMorning={countdown.isChristmasMorning}
         enabled={snowEnabled}
       />
 
-      {/* Top Open Space Reserved for macOS System Clock */}
-      <header className="relative z-20 flex min-h-[22vh] flex-col items-center justify-center px-6 pt-8 text-center">
-        {showMacClock ? (
-          <div data-testid="mac-clock-preview" className="animate-fade-in">
-            <div className="text-sm font-semibold tracking-wide text-slate-200/90 drop-shadow">
-              {formattedMacDate}
+      {/* Top Space for System Clock Preview or Native Clearance */}
+      {!widgetMode && (
+        <header className="relative z-20 flex min-h-[14vh] flex-col items-center justify-center px-4 pt-4 text-center">
+          {showMacClock ? (
+            <div data-testid="mac-clock-preview" className="animate-fade-in">
+              <div className="text-xs font-semibold tracking-wide text-slate-200/90 drop-shadow sm:text-sm">
+                {formattedMacDate}
+              </div>
+              <div className="font-sans text-6xl font-bold tracking-tight text-white drop-shadow-[0_6px_28px_rgba(0,0,0,0.7)] sm:text-7xl">
+                9:41
+              </div>
             </div>
-            <div className="font-sans text-7xl font-bold tracking-tight text-white drop-shadow-[0_6px_28px_rgba(0,0,0,0.65)] sm:text-8xl">
-              9:41
-            </div>
-          </div>
-        ) : (
-          <div
-            data-testid="mac-clock-negative-space"
-            className="h-24 w-full"
-            aria-label="Open space reserved for macOS Lock Screen Clock"
-          />
-        )}
-      </header>
-
-      {/* Main Lock-Screen Centerpiece: Optional Snow Globe + Big Countdown + 4 Small Milestones */}
-      <main className="relative z-20 mx-auto flex w-full max-w-5xl flex-1 flex-col items-center justify-end px-6 pb-8 text-center">
-        {/* Optional Simple Snow Globe Centerpiece */}
-        {showSnowGlobe && (
-          <div className="mb-2 flex justify-center">
-            <canvas
-              ref={globeCanvasRef}
-              data-testid="minimal-snow-globe-canvas"
-              aria-label="Enchanted Christmas Snow Globe"
-              className="h-[230px] w-[230px] sm:h-[275px] sm:w-[275px]"
+          ) : (
+            <div
+              data-testid="mac-clock-negative-space"
+              className="h-10 w-full"
+              aria-label="Open space reserved for system Lock Screen Clock"
             />
+          )}
+        </header>
+      )}
+
+      {/* Main Experience: Split Two-Column on Desktop, Stacked on Mobile */}
+      <main
+        className={`relative z-20 mx-auto flex w-full max-w-6xl flex-1 items-center justify-center px-4 ${
+          widgetMode ? 'py-2' : 'py-4'
+        }`}
+      >
+        <div className="grid w-full items-center gap-6 lg:grid-cols-12 lg:gap-8">
+          {/* Left Column: The Signature Enchanted Snow Globe */}
+          <div className="flex flex-col items-center justify-center lg:col-span-5">
+            <div
+              onClick={triggerSnowSwirl}
+              onMouseEnter={triggerSnowSwirl}
+              role="button"
+              tabIndex={0}
+              aria-label="Enchanted Christmas Snow Globe. Click or hover to swirl magical snow."
+              className="group relative cursor-pointer transition-transform duration-500 hover:scale-[1.02]"
+            >
+              {/* Outer Ambient Glow */}
+              <div className="absolute -inset-4 rounded-full bg-gradient-to-tr from-sky-400/30 via-indigo-500/20 to-amber-200/15 blur-2xl transition duration-500 group-hover:from-sky-400/45 group-hover:blur-3xl" />
+
+              {/* Snow Globe Image Container */}
+              <div className="relative h-64 w-64 overflow-hidden rounded-full border-4 border-sky-200/70 shadow-[0_12px_45px_rgba(3,10,30,0.85)] sm:h-80 sm:w-80 lg:h-96 lg:w-96">
+                <img
+                  src={GENERATED_ASSETS.snowGlobeCottage}
+                  alt="Enchanted Crystal Snow Globe with Cozy Winter Cottage"
+                  className="h-full w-full object-cover transition-transform duration-700 group-hover:scale-105"
+                />
+
+                {/* Swirling particle overlay on interaction */}
+                {isSwirling && (
+                  <div className="pointer-events-none absolute inset-0 animate-spin bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-white/20 via-sky-300/10 to-transparent duration-1000" />
+                )}
+
+                {/* Crystal curved glass highlight */}
+                <div className="pointer-events-none absolute -inset-full rotate-45 bg-gradient-to-r from-transparent via-white/20 to-transparent opacity-60" />
+              </div>
+
+              {/* Interactive Swirl Hint Pill */}
+              <div className="mt-3 flex items-center justify-center gap-1.5 text-center text-[11px] font-medium text-sky-200/80 drop-shadow">
+                <Sparkles className="h-3 w-3 text-amber-300" />
+                <span>{isSwirling ? 'Swirling Christmas Magic…' : 'Tap or hover to swirl snow'}</span>
+              </div>
+            </div>
           </div>
-        )}
 
-        {/* Title & December 25, 2026 Deadline */}
-        <p className="text-xs font-semibold tracking-[0.28em] text-amber-200/90 uppercase sm:text-sm">
-          ✦ Frost &amp; Wonder · December 25, {countdown.targetYear} ✦
-        </p>
+          {/* Right Column: Title, 4-Box Countdown, and 4 Glowing Milestones */}
+          <div className="flex flex-col items-center text-center lg:col-span-7 lg:items-start lg:text-left">
+            {/* Header / Brand */}
+            <div className="flex items-center gap-2 text-xs font-bold tracking-[0.28em] text-amber-200/95 uppercase sm:text-sm">
+              <Sparkles className="h-4 w-4 text-amber-300" />
+              <span>Frost &amp; Wonder</span>
+              <Sparkles className="h-4 w-4 text-amber-300" />
+            </div>
 
-        {/* Main Countdown Text: "36 Days Until Christmas" */}
-        <h1
-          data-testid="main-days-countdown"
-          className="font-serif-display mt-2 text-5xl font-bold tracking-tight text-white drop-shadow-[0_8px_32px_rgba(2,6,23,0.9)] sm:text-7xl"
-        >
-          {countdown.isChristmasMorning
-            ? 'Merry Christmas'
-            : `${countdown.days} ${dayWord} Until Christmas`}
-        </h1>
+            <h1
+              data-testid="main-countdown-heading"
+              className="font-serif-display mt-1 text-4xl font-bold tracking-tight text-white drop-shadow-[0_8px_32px_rgba(2,6,23,0.9)] sm:text-6xl lg:text-7xl"
+            >
+              Christmas Countdown
+            </h1>
 
-        {/* Three or Four Small Milestone Dates in One Minimal Timeline Underneath */}
-        <div
-          data-testid="minimal-milestone-timeline"
-          className="mt-7 w-full max-w-4xl rounded-full border border-sky-200/20 bg-[#040a1a]/60 px-6 py-4 shadow-2xl backdrop-blur-xl sm:px-10"
-        >
-          <div
-            className={`grid grid-cols-2 gap-4 ${
-              milestoneCount === 3 ? 'sm:grid-cols-3' : 'sm:grid-cols-4'
-            }`}
-          >
-            {visibleMilestones.map((ms, index) => {
-              const parsed = new Date(ms.targetDate);
-              const shortDate = Number.isNaN(parsed.getTime())
-                ? 'DEC'
-                : parsed
-                    .toLocaleDateString('en-US', {
-                      month: 'short',
-                      day: 'numeric',
-                    })
-                    .toUpperCase();
-              const shortTitle = formatShortMilestoneTitle(ms.title);
+            {/* Target Date Pill */}
+            <div className="mt-2 inline-flex items-center gap-2 rounded-full border border-sky-400/40 bg-sky-950/40 px-4 py-1 text-xs font-semibold tracking-wider text-sky-200 backdrop-blur-md">
+              <Calendar className="h-3.5 w-3.5 text-sky-300" />
+              <span>DECEMBER 25, {countdown.targetYear}</span>
+            </div>
 
-              return (
+            {/* 4-Box Countdown Grid: DAYS, HOURS, MIN, SEC (Live ticking every second) */}
+            <div
+              data-testid="four-box-countdown"
+              className="mt-5 grid grid-cols-4 gap-2.5 sm:gap-3.5"
+            >
+              {[
+                { label: 'DAYS', val: countdown.days },
+                { label: 'HOURS', val: countdown.hours },
+                { label: 'MIN', val: countdown.minutes },
+                { label: 'SEC', val: countdown.seconds },
+              ].map((unit) => (
                 <div
-                  key={ms.id}
-                  data-testid={`milestone-item-${index + 1}`}
-                  className="group flex flex-col items-center text-center"
+                  key={unit.label}
+                  className="flex flex-col items-center justify-center rounded-2xl border border-sky-200/25 bg-slate-950/65 px-3 py-3 shadow-[0_8px_24px_rgba(2,6,23,0.6)] backdrop-blur-xl sm:px-5 sm:py-4"
                 >
-                  <div className="flex items-center gap-1.5">
-                    <button
-                      type="button"
-                      onClick={() => handleToggleMilestoneDone(ms.id)}
-                      title="Toggle completed"
-                      className={`font-mono-tabular text-xs font-bold tracking-wider transition ${
-                        ms.completed
-                          ? 'text-emerald-300'
-                          : 'text-amber-200 hover:text-white'
-                      }`}
-                    >
-                      {ms.completed ? `✓ ${shortDate}` : `✦ ${shortDate}`}
-                    </button>
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={() => openEditMilestone(ms)}
-                    title="Click to edit milestone date or title"
-                    className="font-serif-display mt-0.5 text-lg font-semibold text-white transition hover:text-sky-200 sm:text-xl"
-                  >
-                    {shortTitle}
-                  </button>
+                  <span className="font-mono-tabular text-3xl font-bold text-white drop-shadow-[0_4px_16px_rgba(56,189,248,0.4)] sm:text-5xl">
+                    {String(unit.val).padStart(2, '0')}
+                  </span>
+                  <span className="mt-1 text-[10px] font-bold tracking-wider text-sky-200/80 sm:text-xs">
+                    {unit.label}
+                  </span>
                 </div>
-              );
-            })}
+              ))}
+            </div>
+
+            {/* Section Divider: —— Your Christmas Milestones —— */}
+            <div className="mt-6 flex w-full items-center justify-center gap-3 lg:justify-start">
+              <span className="h-px w-8 bg-sky-200/30 sm:w-16" />
+              <span className="text-xs font-bold tracking-wider text-sky-100/90 uppercase sm:text-sm">
+                Your Christmas Milestones
+              </span>
+              <span className="h-px w-8 bg-sky-200/30 sm:w-16" />
+            </div>
+
+            {/* Four Preloaded Milestones with Signature Glowing Highlight */}
+            <div
+              data-testid="milestone-stack-container"
+              className="mt-3 flex w-full flex-col gap-2.5"
+            >
+              {sortedMilestones.map((ms) => {
+                const status = getMilestoneDisplayStatus(ms, now, sortedMilestones);
+                const isGlowingUpcoming = status.isGlow;
+
+                return (
+                  <div
+                    key={ms.id}
+                    data-testid={`milestone-item-${ms.id}`}
+                    onClick={() => handleToggleMilestoneDone(ms.id)}
+                    role="button"
+                    tabIndex={0}
+                    title="Click to toggle completed"
+                    className={`group relative flex items-center justify-between rounded-2xl border px-4 py-2.5 text-left transition duration-300 sm:px-5 sm:py-3 cursor-pointer ${
+                      isGlowingUpcoming
+                        ? 'border-sky-300/90 bg-gradient-to-r from-sky-500/25 via-cyan-500/20 to-indigo-500/25 shadow-[0_0_24px_rgba(56,189,248,0.45)] ring-2 ring-sky-300/40 backdrop-blur-xl'
+                        : status.state === 'completed'
+                        ? 'border-emerald-400/40 bg-emerald-950/25 opacity-80 backdrop-blur-md'
+                        : status.state === 'past'
+                        ? 'border-white/5 bg-slate-950/40 opacity-60 backdrop-blur-md'
+                        : 'border-white/10 bg-slate-900/50 backdrop-blur-md hover:border-white/20'
+                    }`}
+                  >
+                    {/* Left: Icon, T-minus badge, and title */}
+                    <div className="flex items-center gap-3">
+                      <div
+                        className={`flex h-8 w-8 items-center justify-center rounded-xl border ${
+                          isGlowingUpcoming
+                            ? 'border-sky-300/60 bg-sky-400/20'
+                            : status.state === 'completed'
+                            ? 'border-emerald-300/40 bg-emerald-400/10'
+                            : 'border-white/10 bg-white/5'
+                        }`}
+                      >
+                        {status.state === 'completed' ? (
+                          <Check className="h-4 w-4 text-emerald-300" />
+                        ) : (
+                          getMilestoneIcon(ms.icon)
+                        )}
+                      </div>
+
+                      <div className="flex flex-col sm:flex-row sm:items-center sm:gap-2">
+                        <span
+                          className={`font-mono-tabular text-xs font-bold tracking-wider sm:text-sm ${
+                            isGlowingUpcoming
+                              ? 'text-amber-200'
+                              : status.state === 'completed'
+                              ? 'text-emerald-300 line-through decoration-emerald-400/60'
+                              : status.state === 'past'
+                              ? 'text-slate-400'
+                              : 'text-sky-200'
+                          }`}
+                        >
+                          {status.tMinusText} · {status.formattedDate}
+                        </span>
+
+                        <span
+                          className={`text-xs font-semibold sm:text-sm ${
+                            isGlowingUpcoming
+                              ? 'text-white'
+                              : status.state === 'completed'
+                              ? 'text-slate-300 line-through'
+                              : status.state === 'past'
+                              ? 'text-slate-400'
+                              : 'text-slate-200'
+                          }`}
+                        >
+                          {status.shortTitle}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Right: Next Up Badge or Completed Tag */}
+                    <div className="flex items-center gap-2">
+                      {status.badgeText && (
+                        <span
+                          data-testid="next-up-badge"
+                          className="inline-flex items-center gap-1 rounded-full border border-sky-300/70 bg-sky-400/25 px-2.5 py-0.5 text-[11px] font-bold tracking-wide text-white shadow-[0_0_12px_rgba(56,189,248,0.5)]"
+                        >
+                          <Sparkles className="h-3 w-3 text-sky-200" />
+                          {status.badgeText}
+                        </span>
+                      )}
+
+                      {status.state === 'completed' && (
+                        <span className="text-[11px] font-bold text-emerald-300">
+                          Completed
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           </div>
         </div>
       </main>
 
-      {/* Whisper-Quiet Bottom Control Pill (Wallpaper Export, Reminder Export & Subtle Toggles) */}
-      <footer className="relative z-20 mx-auto w-full max-w-5xl px-4 pb-5">
-        {statusToast && (
-          <div
-            role="status"
-            data-testid="status-toast"
-            className="mx-auto mb-3 max-w-2xl rounded-2xl border border-sky-200/25 bg-slate-950/90 px-4 py-2.5 text-center text-xs text-sky-100 shadow-xl backdrop-blur-xl"
-          >
-            {statusToast}
-          </div>
-        )}
-
-        <div className="mx-auto flex flex-wrap items-center justify-center gap-2 rounded-2xl border border-white/10 bg-slate-950/65 px-4 py-2.5 text-xs backdrop-blur-xl">
-          {/* Resolution Selector */}
-          <select
-            aria-label="Wallpaper resolution"
-            value={selectedResolution}
-            onChange={(e) =>
-              setSelectedResolution(e.target.value as WallpaperResolutionId)
-            }
-            className="rounded-xl border border-white/15 bg-slate-900/90 px-3 py-1.5 text-xs font-medium text-slate-200 focus:outline-none"
-          >
-            <option value="qhd_2560x1440">2560 × 1440 (QHD / 1440p)</option>
-            <option value="uhd_3840x2160">3840 × 2160 (True 4K UHD)</option>
-          </select>
-
-          {/* Primary Download High-Res Wallpaper PNG Button */}
+      {/* Floating Discreet Widget Mode Toggle in Bottom-Right or Top-Right */}
+      {widgetMode ? (
+        <div className="fixed bottom-3 right-3 z-50">
           <button
             type="button"
-            onClick={handleDownloadWallpaperPng}
-            data-testid="download-wallpaper-btn"
-            className="inline-flex items-center gap-1.5 rounded-xl bg-amber-300 px-4 py-1.5 text-xs font-bold text-slate-950 shadow-sm transition hover:bg-amber-200"
+            onClick={() => setWidgetMode(false)}
+            title="Expand Controls & Wallpaper Exports"
+            className="inline-flex items-center gap-1.5 rounded-full border border-sky-200/25 bg-slate-950/80 px-3.5 py-1.5 text-xs font-medium text-sky-200 shadow-xl backdrop-blur-xl transition hover:bg-slate-900 hover:text-white"
           >
-            <Download className="h-3.5 w-3.5" />
-            Download Wallpaper (.PNG)
-          </button>
-
-          {/* View Actual Exported Wallpaper PNG */}
-          <button
-            type="button"
-            onClick={handleOpenExportedPngPreview}
-            data-testid="preview-exported-png-btn"
-            className="inline-flex items-center gap-1.5 rounded-xl border border-sky-200/25 bg-slate-900/80 px-3 py-1.5 text-xs font-medium text-sky-100 transition hover:bg-slate-800"
-          >
-            <Eye className="h-3.5 w-3.5" />
-            View Exported PNG
-          </button>
-
-          {/* Optional Reminder Export (.ICS) */}
-          <button
-            type="button"
-            onClick={() => handleExportIcsReminders(visibleMilestones)}
-            data-testid="export-ics-reminders-btn"
-            className="inline-flex items-center gap-1.5 rounded-xl border border-white/15 bg-slate-900/80 px-3 py-1.5 text-xs font-medium text-slate-200 transition hover:text-white"
-          >
-            <Calendar className="h-3.5 w-3.5 text-amber-300" />
-            Download Reminders (.ICS)
-          </button>
-
-          <span aria-hidden="true" className="text-slate-600">
-            |
-          </span>
-
-          {/* Subtle Lock-Screen View Toggles */}
-          <button
-            type="button"
-            onClick={() => setShowSnowGlobe((g) => !g)}
-            aria-pressed={showSnowGlobe}
-            className={`rounded-xl border px-2.5 py-1.5 text-xs font-medium transition ${
-              showSnowGlobe
-                ? 'border-sky-300/35 bg-sky-400/15 text-sky-100'
-                : 'border-white/10 bg-slate-900/60 text-slate-400 hover:text-white'
-            }`}
-          >
-            {showSnowGlobe ? 'Snow Globe: On' : 'Snow Globe: Off'}
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setSnowEnabled((s) => !s)}
-            aria-pressed={snowEnabled}
-            className={`inline-flex items-center gap-1 rounded-xl border px-2.5 py-1.5 text-xs font-medium transition ${
-              snowEnabled
-                ? 'border-sky-300/35 bg-sky-400/15 text-sky-100'
-                : 'border-white/10 bg-slate-900/60 text-slate-400 hover:text-white'
-            }`}
-          >
-            <Sparkles className="h-3 w-3" />
-            {snowEnabled ? 'Snow: On' : 'Snow: Off'}
-          </button>
-
-          <button
-            type="button"
-            onClick={() =>
-              setMilestoneCount((c) => (c === 4 ? 3 : 4))
-            }
-            className="rounded-xl border border-white/10 bg-slate-900/60 px-2.5 py-1.5 text-xs font-medium text-slate-300 hover:text-white"
-          >
-            {milestoneCount} Milestones
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setShowMacClock((c) => !c)}
-            aria-pressed={showMacClock}
-            className="rounded-xl border border-white/10 bg-slate-900/60 px-2.5 py-1.5 text-xs font-medium text-slate-300 hover:text-white"
-          >
-            {showMacClock ? 'Hide Mac Clock' : 'Preview Mac Clock'}
+            <Maximize2 className="h-3.5 w-3.5" />
+            <span>Full View</span>
           </button>
         </div>
-      </footer>
+      ) : (
+        /* Standard View Bottom Controls */
+        <footer className="relative z-20 mx-auto w-full max-w-5xl px-4 pb-4">
+          {statusToast && (
+            <div
+              role="status"
+              data-testid="status-toast"
+              className="mx-auto mb-3 max-w-2xl rounded-2xl border border-sky-200/25 bg-slate-950/90 px-4 py-2.5 text-center text-xs text-sky-100 shadow-xl backdrop-blur-xl animate-fade-in"
+            >
+              {statusToast}
+            </div>
+          )}
 
-      {/* Minimal Milestone Edit Modal */}
-      {editingMilestone && (
+          <div className="mx-auto flex flex-wrap items-center justify-center gap-2 rounded-2xl border border-white/10 bg-slate-950/70 p-2 text-xs backdrop-blur-xl">
+            {/* Resolution Selector */}
+            <select
+              aria-label="Wallpaper resolution"
+              value={selectedResolution}
+              onChange={(e) =>
+                setSelectedResolution(e.target.value as WallpaperResolutionId)
+              }
+              className="rounded-xl border border-white/15 bg-slate-900/90 px-3 py-1.5 text-xs font-medium text-slate-200 focus:outline-none"
+            >
+              <option value="qhd_2560x1440">Desktop 2560 × 1440 (QHD)</option>
+              <option value="uhd_3840x2160">Desktop 3840 × 2160 (True 4K)</option>
+              <option value="mobile_1290x2796">Mobile 1290 × 2796 (Phone)</option>
+            </select>
+
+            {/* Download Wallpaper PNG Button */}
+            <button
+              type="button"
+              onClick={handleDownloadWallpaperPng}
+              data-testid="download-wallpaper-btn"
+              className="inline-flex items-center gap-1.5 rounded-xl bg-amber-300 px-3.5 py-1.5 text-xs font-bold text-slate-950 shadow-sm transition hover:bg-amber-200"
+            >
+              <Download className="h-3.5 w-3.5" />
+              Download Wallpaper (.PNG)
+            </button>
+
+            {/* View Exported PNG */}
+            <button
+              type="button"
+              onClick={handleOpenExportedPngPreview}
+              data-testid="preview-exported-png-btn"
+              className="inline-flex items-center gap-1.5 rounded-xl border border-sky-200/25 bg-slate-900/80 px-3 py-1.5 text-xs font-medium text-sky-100 transition hover:bg-slate-800"
+            >
+              <Eye className="h-3.5 w-3.5" />
+              View PNG
+            </button>
+
+            {/* Widget Mode Toggle */}
+            <button
+              type="button"
+              onClick={() => setWidgetMode(true)}
+              data-testid="widget-mode-toggle"
+              title="Hide controls and display only the live ticking countdown, snow globe, and 4 milestones"
+              className="inline-flex items-center gap-1.5 rounded-xl border border-sky-400/30 bg-sky-950/50 px-3 py-1.5 text-xs font-medium text-sky-200 transition hover:bg-sky-900/60"
+            >
+              <Minimize2 className="h-3.5 w-3.5" />
+              Widget Mode
+            </button>
+
+            {/* AI Architecture Plan Modal Button */}
+            <button
+              type="button"
+              onClick={() => setShowAiPlanModal(true)}
+              data-testid="ai-plan-btn"
+              className="inline-flex items-center gap-1.5 rounded-xl border border-white/15 bg-slate-900/80 px-3 py-1.5 text-xs font-medium text-amber-200 transition hover:bg-slate-800"
+            >
+              <Info className="h-3.5 w-3.5" />
+              Gemini Milestone Plan
+            </button>
+
+            {/* Calendar Reminder (.ICS) */}
+            <button
+              type="button"
+              onClick={handleExportIcsReminders}
+              data-testid="export-ics-reminders-btn"
+              className="inline-flex items-center gap-1.5 rounded-xl border border-white/15 bg-slate-900/80 px-3 py-1.5 text-xs font-medium text-slate-200 transition hover:text-white"
+            >
+              <Calendar className="h-3.5 w-3.5 text-sky-300" />
+              Reminders (.ICS)
+            </button>
+
+            {/* Falling Snow Toggle */}
+            <button
+              type="button"
+              onClick={() => setSnowEnabled((s) => !s)}
+              aria-pressed={snowEnabled}
+              className={`inline-flex items-center gap-1 rounded-xl border px-2.5 py-1.5 text-xs font-medium transition ${
+                snowEnabled
+                  ? 'border-sky-300/35 bg-sky-400/15 text-sky-100'
+                  : 'border-white/10 bg-slate-900/60 text-slate-400 hover:text-white'
+              }`}
+            >
+              <Sparkles className="h-3 w-3" />
+              {snowEnabled ? 'Snow: On' : 'Snow: Off'}
+            </button>
+
+            {/* Clock Overlay Toggle */}
+            <button
+              type="button"
+              onClick={() => setShowMacClock((c) => !c)}
+              aria-pressed={showMacClock}
+              className="rounded-xl border border-white/10 bg-slate-900/60 px-2.5 py-1.5 text-xs font-medium text-slate-300 hover:text-white"
+            >
+              {showMacClock ? 'Hide Clock' : 'Preview Clock'}
+            </button>
+
+            {/* PWA Install Button if available */}
+            {isInstallable && (
+              <button
+                type="button"
+                onClick={install}
+                className="inline-flex items-center gap-1.5 rounded-xl bg-sky-400 px-3 py-1.5 text-xs font-bold text-slate-950 transition hover:bg-sky-300"
+              >
+                Install App
+              </button>
+            )}
+
+            {isIOS && !isInstalled && (
+              <button
+                type="button"
+                onClick={() => setShowPwaModal(true)}
+                className="rounded-xl border border-white/15 bg-slate-900/80 px-2.5 py-1.5 text-xs font-medium text-slate-300 hover:text-white"
+              >
+                Install on iOS
+              </button>
+            )}
+          </div>
+        </footer>
+      )}
+
+      {/* AI Milestone Architecture Plan Modal */}
+      {showAiPlanModal && (
         <div
           role="dialog"
           aria-modal="true"
-          aria-label="Edit Milestone"
-          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 p-4 backdrop-blur-md"
+          aria-label="Gemini Milestone Planning Architecture"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/85 p-4 backdrop-blur-md"
         >
-          <form
-            onSubmit={handleSaveMilestone}
-            className="w-full max-w-sm space-y-4 rounded-3xl border border-sky-200/25 bg-slate-900 p-6 shadow-2xl"
-          >
+          <div className="w-full max-w-lg space-y-4 rounded-3xl border border-sky-200/25 bg-slate-900 p-6 shadow-2xl">
             <div className="flex items-center justify-between">
-              <h2 className="font-serif-display text-2xl font-semibold text-white">
-                Edit Milestone
-              </h2>
+              <div className="flex items-center gap-2">
+                <Sparkles className="h-5 w-5 text-amber-300" />
+                <h2 className="font-serif-display text-2xl font-bold text-white">
+                  Gemini Milestone Architecture
+                </h2>
+              </div>
               <button
                 type="button"
-                onClick={() => setEditingMilestone(null)}
+                onClick={() => setShowAiPlanModal(false)}
                 className="text-slate-400 hover:text-white"
               >
-                <X className="h-4 w-4" />
+                <X className="h-5 w-5" />
               </button>
             </div>
 
-            <div>
-              <label
-                htmlFor="edit-ms-title"
-                className="block text-xs font-medium text-slate-300"
-              >
-                Short Title
-              </label>
-              <input
-                id="edit-ms-title"
-                type="text"
-                required
-                value={draftTitle}
-                onChange={(e) => setDraftTitle(e.target.value)}
-                className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-xs text-white"
-              />
-            </div>
+            <p className="text-xs leading-relaxed text-slate-300">
+              For the Handshake <em>&quot;Your Deadline, Your Design&quot;</em> challenge,
+              Gemini assisted in backward-planning the major December 25 deadline into four achievable, stress-free checkpoints:
+            </p>
 
-            <div>
-              <label
-                htmlFor="edit-ms-date"
-                className="block text-xs font-medium text-slate-300"
-              >
-                Date
-              </label>
-              <input
-                id="edit-ms-date"
-                type="datetime-local"
-                required
-                value={draftDate}
-                onChange={(e) => setDraftDate(e.target.value)}
-                className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-xs text-white"
-              />
-            </div>
-
-            <div className="flex items-center justify-between gap-2 pt-2">
-              <button
-                type="button"
-                onClick={() => {
-                  handleExportIcsReminders([
-                    {
-                      ...editingMilestone,
-                      title: draftTitle,
-                      targetDate: draftDate,
-                    },
-                  ]);
-                }}
-                className="inline-flex items-center gap-1 rounded-xl border border-sky-200/25 bg-slate-950 px-3 py-2 text-xs font-medium text-sky-200 hover:text-white"
-              >
-                <Calendar className="h-3.5 w-3.5" />
-                Download .ICS
-              </button>
-
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => setEditingMilestone(null)}
-                  className="rounded-xl border border-slate-700 bg-slate-950 px-3.5 py-2 text-xs text-slate-300 hover:text-white"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="inline-flex items-center gap-1 rounded-xl bg-amber-300 px-4 py-2 text-xs font-bold text-slate-950 hover:bg-amber-200"
-                >
-                  <Check className="h-3.5 w-3.5" />
-                  Save
-                </button>
+            <div className="space-y-2.5 rounded-2xl border border-white/10 bg-slate-950/70 p-4 text-xs">
+              <div className="flex items-start gap-2">
+                <span className="font-mono-tabular font-bold text-amber-200">T–14 (Dec 11):</span>
+                <span className="text-slate-200"><strong>Finalize gift lists</strong> — Locks wishlists before holiday order deadlines.</span>
+              </div>
+              <div className="flex items-start gap-2">
+                <span className="font-mono-tabular font-bold text-sky-200">T–7 (Dec 18):</span>
+                <span className="text-slate-200"><strong>Finish holiday shopping</strong> — Protects against shipping delays and rush fees.</span>
+              </div>
+              <div className="flex items-start gap-2">
+                <span className="font-mono-tabular font-bold text-indigo-200">T–3 (Dec 22):</span>
+                <span className="text-slate-200"><strong>Wrap gifts and prepare</strong> — Enjoy cozy ribbon tying and card writing.</span>
+              </div>
+              <div className="flex items-start gap-2">
+                <span className="font-mono-tabular font-bold text-emerald-200">T–1 (Dec 24):</span>
+                <span className="text-slate-200"><strong>Complete final preparations</strong> — Stage presents under the tree for Christmas morning.</span>
               </div>
             </div>
-          </form>
+
+            <p className="text-[11px] text-slate-400">
+              As dates advance in local time, Frost &amp; Wonder automatically shifts the soft icy-blue glow to the next upcoming milestone.
+            </p>
+
+            <div className="flex justify-end pt-2">
+              <button
+                type="button"
+                onClick={() => setShowAiPlanModal(false)}
+                className="rounded-xl bg-amber-300 px-5 py-2 text-xs font-bold text-slate-950 hover:bg-amber-200"
+              >
+                Close Plan
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
-      {/* Actual Exported High-Resolution Wallpaper PNG Viewer Modal */}
+      {/* iOS Installation Instructions Modal */}
+      {showPwaModal && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Install on iPhone / iPad"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/85 p-4 backdrop-blur-md"
+        >
+          <div className="w-full max-w-sm space-y-4 rounded-3xl border border-sky-200/25 bg-slate-900 p-6 shadow-2xl">
+            <h3 className="font-serif-display text-2xl font-bold text-white">
+              Install on iPhone or iPad
+            </h3>
+            <p className="text-xs leading-relaxed text-slate-300">
+              To add Frost &amp; Wonder to your iOS Home Screen for instant offline access:
+            </p>
+            <ol className="list-decimal space-y-1.5 pl-5 text-xs text-slate-200">
+              <li>Tap the <strong>Share</strong> button in Safari toolbar.</li>
+              <li>Scroll down and tap <strong>Add to Home Screen</strong>.</li>
+              <li>Tap <strong>Add</strong> in the top-right corner.</li>
+            </ol>
+            <button
+              type="button"
+              onClick={() => setShowPwaModal(false)}
+              className="mt-4 w-full rounded-xl bg-sky-400 py-2 text-xs font-bold text-slate-950 hover:bg-sky-300"
+            >
+              Done
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Exported Wallpaper PNG Modal */}
       {exportedPngPreviewUrl && (
         <div
           role="dialog"
           aria-modal="true"
-          aria-label="Exported Mac Lock-Screen Wallpaper PNG"
+          aria-label="Exported Lock-Screen Wallpaper PNG Preview"
           className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/90 p-4 backdrop-blur-xl"
         >
-          <div className="max-w-5xl w-full space-y-3 rounded-3xl border border-sky-200/25 bg-slate-900/95 p-5 shadow-2xl">
+          <div className="w-full max-w-5xl space-y-3 rounded-3xl border border-sky-200/25 bg-slate-900/95 p-5 shadow-2xl">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
                 <h2 className="font-serif-display text-2xl font-semibold text-white">
-                  Actual Exported Mac Lock-Screen Wallpaper (.PNG)
+                  Exported Lock-Screen Wallpaper (.PNG)
                 </h2>
                 <p className="text-xs text-slate-400">
-                  {WALLPAPER_RESOLUTIONS[selectedResolution].shortLabel} · Static lock-screen snapshot with open top space for the macOS clock
+                  {WALLPAPER_RESOLUTIONS[selectedResolution].shortLabel} · Static wallpaper snapshot leaving open space for your device&apos;s system clock.
                 </p>
               </div>
               <div className="flex items-center gap-2">
@@ -934,6 +807,8 @@ export default function App() {
                   download={`Frost-and-Wonder-Lock-Screen-${
                     selectedResolution === 'uhd_3840x2160'
                       ? '3840x2160-4K'
+                      : selectedResolution === 'mobile_1290x2796'
+                      ? '1290x2796-Mobile'
                       : '2560x1440-QHD'
                   }.png`}
                   className="inline-flex items-center gap-1.5 rounded-xl bg-amber-300 px-4 py-2 text-xs font-bold text-slate-950 hover:bg-amber-200"
@@ -944,19 +819,19 @@ export default function App() {
                 <button
                   type="button"
                   onClick={() => setExportedPngPreviewUrl(null)}
-                  className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-xs text-slate-300 hover:text-white"
+                  className="rounded-xl border border-slate-700 bg-slate-950 px-3.5 py-2 text-xs text-slate-300 hover:text-white"
                 >
                   Close
                 </button>
               </div>
             </div>
 
-            <div className="overflow-hidden rounded-2xl border border-sky-200/20 bg-slate-950">
+            <div className="flex max-h-[70vh] items-center justify-center overflow-hidden rounded-2xl border border-sky-200/20 bg-slate-950 p-2">
               <img
                 src={exportedPngPreviewUrl}
-                alt="Actual Exported Frost & Wonder Mac Lock-Screen Wallpaper PNG"
+                alt="Exported Frost & Wonder Lock-Screen Wallpaper PNG"
                 data-testid="actual-exported-wallpaper-img"
-                className="aspect-video w-full object-contain"
+                className="max-h-[66vh] w-auto rounded-lg object-contain"
               />
             </div>
           </div>
